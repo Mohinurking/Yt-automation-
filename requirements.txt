@@ -3,3 +3,4 @@ requests
 edge-tts
 gTTS
 pydub
+python-dotenv
