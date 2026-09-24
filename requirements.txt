@@ -1,4 +1,2 @@
-google-generativeai
+google-genai
 edge-tts
-google-api-python-client
-requests
