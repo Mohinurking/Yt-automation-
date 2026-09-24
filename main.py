@@ -1,134 +1,726 @@
 import os
+import re
 import json
-import asyncio
-import requests
-import subprocess
 import time
-from google import genai
+import shutil
+import asyncio
+import logging
+import subprocess
+from pathlib import Path
+
+import requests
 import edge_tts
+from dotenv import load_dotenv
+from google import genai
 
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-async def generate_script_and_prompts():
+# ============================================================
+# CONFIG
+# ============================================================
+
+load_dotenv()
+
+GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+OUTPUT_DIR = Path("output")
+IMAGES_DIR = OUTPUT_DIR / "images"
+AUDIO_DIR = OUTPUT_DIR / "audio"
+CLIPS_DIR = OUTPUT_DIR / "clips"
+
+FINAL_VIDEO = OUTPUT_DIR / "final_video.mp4"
+SCRIPT_FILE = OUTPUT_DIR / "project.json"
+
+WIDTH = 1280
+HEIGHT = 720
+FPS = 30
+
+IMAGE_RETRIES = 3
+IMAGE_WAIT = 2
+
+VOICE = "hi-IN-MadhurNeural"
+VOICE_RATE = "-4%"
+VOICE_PITCH = "-2Hz"
+
+# Try models in this order.
+# Change these if your API account exposes different models.
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
+
+IMAGE_BASE_URL = "https://image.pollinations.ai/prompt/"
+
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+log = logging.getLogger("AI-VIDEO")
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def check_environment():
     if not GEMINI_KEY:
-        raise Exception("GEMINI_API_KEY environment variable is not set.")
-    
-    client = genai.Client(api_key=GEMINI_KEY.strip())
-    
-    system_prompt = (
-        "You are an expert documentary scriptwriter for Dark History and Unsolved Mysteries. "
-        "Create an engaging, deep dark history narrative in Hindi/Hinglish. "
-        "Break the story into dynamic sequential scenes according to the flow and tension of the story. "
-        "For EACH scene, strictly specify:\n"
-        "1. 'text': Narration line for voiceover.\n"
-        "2. 'duration': Recommended time in seconds for this visual scene based on the text speed and tension (between 2 to 8 seconds).\n"
-        "3. 'image_prompt': Highly descriptive image prompt for the scene. "
-        "Always append 'cinematic lighting, dark atmospheric historical scene, ultra detailed, 8k' to image prompts.\n"
-        "Return ONLY a raw valid JSON list of objects with keys 'text', 'duration', and 'image_prompt'."
+        raise RuntimeError(
+            "GEMINI_API_KEY is missing. Put it inside your .env file."
+        )
+
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError(
+            "FFmpeg was not found. Install FFmpeg and add it to PATH."
+        )
+
+    if shutil.which("ffprobe") is None:
+        raise RuntimeError(
+            "ffprobe was not found. Install FFmpeg properly and add it to PATH."
+        )
+
+
+def create_directories():
+    for folder in [OUTPUT_DIR, IMAGES_DIR, AUDIO_DIR, CLIPS_DIR]:
+        folder.mkdir(parents=True, exist_ok=True)
+
+
+def run_command(command):
+    log.debug("Running: %s", " ".join(map(str, command)))
+
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
-    
-    models_to_try = ['gemini-3.6-flash']
-    
-    for model_name in models_to_try:
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Command failed:\n{' '.join(map(str, command))}\n\n"
+            f"{result.stderr[-4000:]}"
+        )
+
+    return result
+
+
+def clean_json(text):
+    text = text.strip()
+
+    # Remove markdown fences if model accidentally adds them.
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s*```$", "", text)
+
+    # Find JSON array if extra text slipped through.
+    start = text.find("[")
+    end = text.rfind("]")
+
+    if start != -1 and end != -1:
+        text = text[start:end + 1]
+
+    return text.strip()
+
+
+# ============================================================
+# GEMINI
+# ============================================================
+
+def build_prompt(topic):
+    return f"""
+You are an expert documentary filmmaker and dark-history storyteller.
+
+Create a cinematic Hindi/Hinglish documentary about:
+
+TOPIC:
+{topic}
+
+The video must feel serious, mysterious, cinematic and engaging.
+
+IMPORTANT:
+- Do NOT invent historical facts.
+- Clearly distinguish known facts from uncertainty.
+- Do not create fake quotes.
+- Keep narration natural for Hindi voiceover.
+- Start with a strong hook.
+- Build tension progressively.
+- Avoid unnecessary filler.
+- Every scene must visually support its narration.
+- Scenes should normally be 3–8 seconds long.
+- Use detailed cinematic visual prompts.
+- Maintain visual continuity between scenes.
+- If a person appears repeatedly, describe their consistent appearance.
+- If the story is historical, use historically appropriate clothing,
+  architecture, weapons, environment and technology.
+- Do not use modern objects in historical scenes unless historically correct.
+
+Return ONLY valid JSON.
+
+Format:
+
+[
+  {{
+    "text": "Hindi/Hinglish narration",
+    "image_prompt": "Detailed visual generation prompt",
+    "mood": "dark / mysterious / tense / emotional / etc"
+  }}
+]
+
+Do not include markdown.
+Do not include explanations outside JSON.
+"""
+
+
+def generate_scenes(topic):
+    client = genai.Client(api_key=GEMINI_KEY)
+
+    prompt = build_prompt(topic)
+
+    for model in GEMINI_MODELS:
         try:
-            print(f"Generating dynamic storyline with {model_name}...")
+            log.info("Generating documentary with %s...", model)
+
             response = client.models.generate_content(
-                model=model_name,
-                contents=system_prompt,
+                model=model,
+                contents=prompt,
+                config={
+                    "response_mime_type": "application/json",
+                },
             )
-            if response and response.text:
-                cleaned_text = response.text.replace("```json", "").replace("```", "").strip()
-                return json.loads(cleaned_text)
-        except Exception as e:
-            print(f"Model {model_name} failed: {e}")
-            
-    raise Exception("Failed to generate content from Gemini.")
 
-def download_images(scenes):
-    os.makedirs("images", exist_ok=True)
-    image_files = []
-    
-    print("Downloading AI images based on dynamic script...")
-    for idx, scene in enumerate(scenes):
-        prompt = scene['image_prompt']
-        encoded_prompt = requests.utils.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&nologo=true&seed={idx+100}"
-        
-        file_path = f"images/scene_{idx+1:03d}.jpg"
+            if not response or not response.text:
+                continue
+
+            raw = clean_json(response.text)
+            scenes = json.loads(raw)
+
+            if not isinstance(scenes, list) or not scenes:
+                raise ValueError("Gemini returned an empty scene list.")
+
+            validated = []
+
+            for i, scene in enumerate(scenes, start=1):
+                text = str(scene.get("text", "")).strip()
+                image_prompt = str(scene.get("image_prompt", "")).strip()
+                mood = str(scene.get("mood", "cinematic")).strip()
+
+                if not text:
+                    continue
+
+                if not image_prompt:
+                    image_prompt = (
+                        "Cinematic documentary scene, "
+                        "dark atmospheric historical environment, "
+                        "realistic details"
+                    )
+
+                image_prompt += (
+                    ", cinematic lighting, dark atmospheric documentary scene, "
+                    "ultra detailed, realistic, 8k, "
+                    "dramatic composition, volumetric lighting, "
+                    "historically appropriate details"
+                )
+
+                validated.append({
+                    "scene": i,
+                    "text": text,
+                    "image_prompt": image_prompt,
+                    "mood": mood,
+                })
+
+            if not validated:
+                raise ValueError("No valid scenes generated.")
+
+            log.info("Generated %d scenes.", len(validated))
+
+            return validated
+
+        except Exception as e:
+            log.warning("%s failed: %s", model, e)
+
+    raise RuntimeError("All Gemini models failed.")
+
+
+# ============================================================
+# IMAGE GENERATION
+# ============================================================
+
+def generate_image_url(prompt, seed):
+    encoded = requests.utils.quote(prompt)
+
+    return (
+        f"{IMAGE_BASE_URL}{encoded}"
+        f"?width={WIDTH}"
+        f"&height={HEIGHT}"
+        f"&nologo=true"
+        f"&seed={seed}"
+    )
+
+
+def download_image(prompt, output_path, seed):
+    headers = {
+        "User-Agent": "AI-Video-Pipeline/1.0"
+    }
+
+    for attempt in range(1, IMAGE_RETRIES + 1):
+
         try:
-            res = requests.get(url, timeout=30)
-            if res.status_code == 200:
-                with open(file_path, "wb") as f:
-                    f.write(res.content)
-                print(f"Downloaded: {file_path}")
-                image_files.append(file_path)
-            else:
-                print(f"Failed image download for scene {idx+1}")
+            log.info(
+                "Image %s | attempt %d/%d",
+                output_path.name,
+                attempt,
+                IMAGE_RETRIES,
+            )
+
+            url = generate_image_url(prompt, seed)
+
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=60,
+            )
+
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "")
+
+            if "image" not in content_type.lower():
+                raise RuntimeError(
+                    f"Unexpected response type: {content_type}"
+                )
+
+            with open(output_path, "wb") as f:
+                f.write(response.content)
+
+            if output_path.stat().st_size < 10_000:
+                raise RuntimeError("Downloaded image appears invalid.")
+
+            return True
+
         except Exception as e:
-            print(f"Error fetching image for scene {idx+1}: {e}")
-            
-        time.sleep(1)
-            
-    return image_files
+            log.warning(
+                "Image failed: %s",
+                e,
+            )
 
-async def generate_audio(scenes, output_file="voiceover.mp3"):
-    full_text = " ".join([s['text'] for s in scenes])
-    
-    voice = "hi-IN-MadhurNeural"
-    communicate = edge_tts.Communicate(full_text, voice, rate="-4%", pitch="-2Hz")
-    await communicate.save(output_file)
-    print("Voiceover generated successfully.")
+            if attempt < IMAGE_RETRIES:
+                time.sleep(IMAGE_WAIT * attempt)
 
-def render_video(scenes, audio_file="voiceover.mp3", output_file="final_video.mp4"):
-    print("Rendering video with DYNAMIC scene durations...")
-    
-    concat_file = "files.txt"
-    with open(concat_file, "w") as f:
-        for idx, scene in enumerate(scenes):
-            img_path = f"images/scene_{idx+1:03d}.jpg"
-            if os.path.exists(img_path):
-                duration = scene.get('duration', 4)
-                f.write(f"file '{img_path}'\n")
-                f.write(f"duration {duration}\n")
-        
-        if scenes:
-            f.write(f"file 'images/scene_{len(scenes):03d}.jpg'\n")
+    return False
+
+
+def download_all_images(scenes):
+    log.info("Generating/downloading scene images...")
+
+    successful = 0
+
+    for index, scene in enumerate(scenes, start=1):
+
+        output = IMAGES_DIR / f"scene_{index:03d}.jpg"
+
+        success = download_image(
+            scene["image_prompt"],
+            output,
+            seed=1000 + index,
+        )
+
+        if success:
+            successful += 1
+        else:
+            log.error("Scene %d image failed.", index)
+
+    if successful == 0:
+        raise RuntimeError("No images were generated.")
+
+    return successful
+
+
+# ============================================================
+# TTS
+# ============================================================
+
+async def generate_scene_audio(text, output_path):
+    communicate = edge_tts.Communicate(
+        text,
+        VOICE,
+        rate=VOICE_RATE,
+        pitch=VOICE_PITCH,
+    )
+
+    await communicate.save(str(output_path))
+
+
+def get_media_duration(path):
+    command = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+
+    result = run_command(command)
+
+    return float(result.stdout.strip())
+
+
+async def generate_all_audio(scenes):
+    log.info("Generating scene-by-scene voiceover...")
+
+    valid_scenes = []
+
+    for index, scene in enumerate(scenes, start=1):
+
+        audio_path = AUDIO_DIR / f"scene_{index:03d}.mp3"
+
+        try:
+            await generate_scene_audio(
+                scene["text"],
+                audio_path,
+            )
+
+            duration = get_media_duration(audio_path)
+
+            if duration <= 0:
+                raise RuntimeError("Invalid audio duration.")
+
+            scene["audio_file"] = str(audio_path)
+            scene["duration"] = round(duration, 3)
+
+            valid_scenes.append(scene)
+
+            log.info(
+                "Scene %d voice: %.2fs",
+                index,
+                duration,
+            )
+
+        except Exception as e:
+            log.error(
+                "TTS failed for scene %d: %s",
+                index,
+                e,
+            )
+
+    if not valid_scenes:
+        raise RuntimeError("No audio scenes generated.")
+
+    return valid_scenes
+
+
+# ============================================================
+# CINEMATIC SCENE VIDEO
+# ============================================================
+
+def render_scene(scene, index):
+    image_path = IMAGES_DIR / f"scene_{index:03d}.jpg"
+    audio_path = Path(scene["audio_file"])
+
+    output_path = CLIPS_DIR / f"clip_{index:03d}.mp4"
+
+    if not image_path.exists():
+        raise RuntimeError(
+            f"Missing image for scene {index}"
+        )
+
+    duration = float(scene["duration"])
+
+    # Slow cinematic zoom.
+    # The image is first fitted into a 1920x1080 canvas,
+    # then zoomed and cropped down to 1280x720.
+
+    video_filter = (
+        "scale=1920:1080:force_original_aspect_ratio=increase,"
+        "crop=1920:1080,"
+        "zoompan="
+        "z='min(zoom+0.00035,1.08)':"
+        "x='iw/2-(iw/zoom/2)':"
+        "y='ih/2-(ih/zoom/2)':"
+        "d=1:"
+        f"s={WIDTH}x{HEIGHT}:"
+        f"fps={FPS},"
+        "format=yuv420p"
+    )
 
     command = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
+
+        "-loop", "1",
+        "-i", str(image_path),
+
+        "-i", str(audio_path),
+
+        "-vf", video_filter,
+
+        "-t", f"{duration:.3f}",
+
+        "-r", str(FPS),
+
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "19",
+
+        "-c:a", "aac",
+        "-b:a", "192k",
+
+        "-ar", "48000",
+
+        "-pix_fmt", "yuv420p",
+
+        "-shortest",
+
+        str(output_path),
+    ]
+
+    run_command(command)
+
+    return output_path
+
+
+def render_all_scenes(scenes):
+    log.info("Rendering cinematic scene clips...")
+
+    clips = []
+
+    for index, scene in enumerate(scenes, start=1):
+
+        try:
+            clip = render_scene(scene, index)
+
+            clips.append(clip)
+
+            log.info(
+                "Rendered scene %d/%d",
+                index,
+                len(scenes),
+            )
+
+        except Exception as e:
+            log.error(
+                "Scene %d rendering failed: %s",
+                index,
+                e,
+            )
+
+    if not clips:
+        raise RuntimeError("No video clips were rendered.")
+
+    return clips
+
+
+# ============================================================
+# CONCATENATE
+# ============================================================
+
+def create_concat_file(clips):
+    concat_file = OUTPUT_DIR / "concat.txt"
+
+    with open(concat_file, "w", encoding="utf-8") as f:
+
+        for clip in clips:
+            absolute_path = clip.resolve()
+
+            # FFmpeg concat file escaping.
+            path_string = str(absolute_path).replace("'", "'\\''")
+
+            f.write(f"file '{path_string}'\n")
+
+    return concat_file
+
+
+def concatenate_clips(clips):
+    concat_file = create_concat_file(clips)
+
+    log.info("Combining all scenes...")
+
+    command = [
+        "ffmpeg",
+        "-y",
+
         "-f", "concat",
         "-safe", "0",
-        "-i", concat_file,
-        "-i", audio_file,
-        "-vf", "crop=in_w:in_h-40:0:0,scale=1280:720",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-shortest",
-        output_file
+
+        "-i", str(concat_file),
+
+        "-c", "copy",
+
+        str(FINAL_VIDEO),
     ]
-    
+
     try:
-        subprocess.run(command, check=True)
-        print(f"Final Dynamic Video rendered successfully: {output_file}")
-    except subprocess.CalledProcessError as e:
-        print(f"FFmpeg error: {e}")
-        raise Exception("Video rendering failed.")
+        run_command(command)
+
+    except Exception:
+        # If stream-copy concat fails because of codec/timestamp differences,
+        # perform a safe re-encode.
+        log.warning(
+            "Stream-copy concat failed. Trying safe re-encode..."
+        )
+
+        command = [
+            "ffmpeg",
+            "-y",
+
+            "-f", "concat",
+            "-safe", "0",
+
+            "-i", str(concat_file),
+
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "19",
+
+            "-c:a", "aac",
+            "-b:a", "192k",
+
+            "-pix_fmt", "yuv420p",
+
+            str(FINAL_VIDEO),
+        ]
+
+        run_command(command)
+
+    return FINAL_VIDEO
+
+
+# ============================================================
+# PROJECT FILE
+# ============================================================
+
+def save_project(topic, scenes):
+    project = {
+        "topic": topic,
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "voice": VOICE,
+        "resolution": f"{WIDTH}x{HEIGHT}",
+        "fps": FPS,
+        "scenes": scenes,
+    }
+
+    with open(
+        SCRIPT_FILE,
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            project,
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+# ============================================================
+# MAIN PIPELINE
+# ============================================================
 
 async def main():
-    print("Starting Advanced Dynamic Video Pipeline...")
-    try:
-        scenes = await generate_script_and_prompts()
-        print(f"\n--- Generated {len(scenes)} Dynamic Scenes ---")
-        
-        download_images(scenes)
-        await generate_audio(scenes)
-        render_video(scenes)
-        
-        print("\nSUCCESS! Dynamic video ready for Youtube!")
-    except Exception as err:
-        print(f"Pipeline Failed: {err}")
-        exit(1)
+
+    print()
+    print("=" * 60)
+    print("        AI DOCUMENTARY VIDEO GENERATOR")
+    print("=" * 60)
+    print()
+
+    check_environment()
+    create_directories()
+
+    topic = input(
+        "Enter documentary topic:\n> "
+    ).strip()
+
+    if not topic:
+        raise RuntimeError("Topic cannot be empty.")
+
+    start_time = time.time()
+
+    # --------------------------------------------------------
+    # 1. GEMINI
+    # --------------------------------------------------------
+
+    scenes = generate_scenes(topic)
+
+    # --------------------------------------------------------
+    # 2. IMAGES
+    # --------------------------------------------------------
+
+    image_count = download_all_images(scenes)
+
+    log.info(
+        "Successfully generated %d/%d images.",
+        image_count,
+        len(scenes),
+    )
+
+    # --------------------------------------------------------
+    # 3. TTS
+    # --------------------------------------------------------
+
+    scenes = await generate_all_audio(scenes)
+
+    # --------------------------------------------------------
+    # 4. SAVE PROJECT DATA
+    # --------------------------------------------------------
+
+    save_project(topic, scenes)
+
+    # --------------------------------------------------------
+    # 5. SCENE VIDEO
+    # --------------------------------------------------------
+
+    clips = render_all_scenes(scenes)
+
+    # --------------------------------------------------------
+    # 6. FINAL VIDEO
+    # --------------------------------------------------------
+
+    final_video = concatenate_clips(clips)
+
+    # --------------------------------------------------------
+    # 7. FINAL INFO
+    # --------------------------------------------------------
+
+    final_duration = get_media_duration(final_video)
+
+    elapsed = time.time() - start_time
+
+    print()
+    print("=" * 60)
+    print("                 SUCCESS")
+    print("=" * 60)
+    print()
+    print(f"Topic       : {topic}")
+    print(f"Scenes      : {len(scenes)}")
+    print(f"Duration    : {final_duration:.2f} seconds")
+    print(f"Resolution  : {WIDTH}x{HEIGHT}")
+    print(f"FPS         : {FPS}")
+    print(f"Video       : {FINAL_VIDEO}")
+    print(f"Project JSON: {SCRIPT_FILE}")
+    print(f"Time taken  : {elapsed / 60:.2f} minutes")
+    print()
+    print("Your documentary video is ready.")
+    print()
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
-    asyncio.main(main()) if hasattr(asyncio, 'main') else asyncio.run(main())
+    try:
+        asyncio.run(main())
+
+    except KeyboardInterrupt:
+        print("\nProcess cancelled by user.")
+
+    except Exception as e:
+        log.exception("PIPELINE FAILED")
+        print()
+        print("ERROR:", e)
