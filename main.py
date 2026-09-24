@@ -14,11 +14,9 @@ async def generate_script():
     
     prompt = "Write an engaging, exciting 40-second Hindi recap script for a popular action manhwa. Keep it in Hindi script or Hinglish, fast-paced and catchy."
     
-    # Updated model list as recommended by Google API response
+    # Updated model list as explicitly requested by Google API
     models_to_try = [
-        'gemini-2.0-flash',
-        'gemini-2.5-flash',
-        'gemini-1.5-flash'
+        'gemini-3.6-flash'
     ]
     
     for model_name in models_to_try:
