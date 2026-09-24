@@ -28,12 +28,12 @@ async def generate_script_and_prompts():
         "Return ONLY a raw valid JSON list of objects with keys 'text' and 'image_prompt'."
     )
     
-    # Updated to use Pro models
-    models_to_try = ['gemini-1.5-pro', 'gemini-3.6-pro', 'gemini-pro']
+    # Reverted back to the working flash model
+    models_to_try = ['gemini-3.6-flash']
     
     for model_name in models_to_try:
         try:
-            print(f"Generating dark manhwa lore with Pro model: {model_name}...")
+            print(f"Generating dark manhwa lore with model: {model_name}...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=system_prompt,
@@ -44,7 +44,7 @@ async def generate_script_and_prompts():
         except Exception as e:
             print(f"Model {model_name} failed: {e}")
             
-    raise Exception("Failed to generate content from Gemini Pro models.")
+    raise Exception("Failed to generate content from Gemini models.")
 
 def download_images(scenes):
     os.makedirs("images", exist_ok=True)
