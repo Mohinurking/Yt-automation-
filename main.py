@@ -10,7 +10,6 @@ from pathlib import Path
 
 import requests
 import edge_tts
-from dotenv import load_dotenv
 from google import genai
 
 
@@ -18,9 +17,7 @@ from google import genai
 # CONFIG
 # ============================================================
 
-load_dotenv()
-
-GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 
 OUTPUT_DIR = Path("output")
 IMAGES_DIR = OUTPUT_DIR / "images"
@@ -42,7 +39,6 @@ VOICE_RATE = "-4%"
 VOICE_PITCH = "-2Hz"
 
 # Try models in this order.
-# Change these if your API account exposes different models.
 GEMINI_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
@@ -71,7 +67,7 @@ log = logging.getLogger("AI-VIDEO")
 def check_environment():
     if not GEMINI_KEY:
         raise RuntimeError(
-            "GEMINI_API_KEY is missing. Put it inside your .env file."
+            "GEMINI_API_KEY is missing. Check your GitHub repository secrets."
         )
 
     if shutil.which("ffmpeg") is None:
@@ -112,11 +108,9 @@ def run_command(command):
 def clean_json(text):
     text = text.strip()
 
-    # Remove markdown fences if model accidentally adds them.
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
     text = re.sub(r"\s*```$", "", text)
 
-    # Find JSON array if extra text slipped through.
     start = text.find("[")
     end = text.rfind("]")
 
@@ -431,10 +425,6 @@ def render_scene(scene, index):
 
     duration = float(scene["duration"])
 
-    # Slow cinematic zoom.
-    # The image is first fitted into a 1920x1080 canvas,
-    # then zoomed and cropped down to 1280x720.
-
     video_filter = (
         "scale=1920:1080:force_original_aspect_ratio=increase,"
         "crop=1920:1080,"
@@ -526,10 +516,7 @@ def create_concat_file(clips):
 
         for clip in clips:
             absolute_path = clip.resolve()
-
-            # FFmpeg concat file escaping.
             path_string = str(absolute_path).replace("'", "'\\''")
-
             f.write(f"file '{path_string}'\n")
 
     return concat_file
@@ -558,8 +545,6 @@ def concatenate_clips(clips):
         run_command(command)
 
     except Exception:
-        # If stream-copy concat fails because of codec/timestamp differences,
-        # perform a safe re-encode.
         log.warning(
             "Stream-copy concat failed. Trying safe re-encode..."
         )
@@ -632,25 +617,22 @@ async def main():
     check_environment()
     create_directories()
 
-    topic = input(
-        "Enter documentary topic:\n> "
-    ).strip()
+    # Default topic for automated cron runs if input isn't interactive
+    topic = "The Mysterious Disappearance of the Roanoke Colony"
+    
+    try:
+        if os.isatty(0):
+            user_input = input("Enter documentary topic:\n> ").strip()
+            if user_input:
+                topic = user_input
+    except Exception:
+        pass
 
-    if not topic:
-        raise RuntimeError("Topic cannot be empty.")
+    log.info("Using documentary topic: %s", topic)
 
     start_time = time.time()
 
-    # --------------------------------------------------------
-    # 1. GEMINI
-    # --------------------------------------------------------
-
     scenes = generate_scenes(topic)
-
-    # --------------------------------------------------------
-    # 2. IMAGES
-    # --------------------------------------------------------
-
     image_count = download_all_images(scenes)
 
     log.info(
@@ -659,34 +641,11 @@ async def main():
         len(scenes),
     )
 
-    # --------------------------------------------------------
-    # 3. TTS
-    # --------------------------------------------------------
-
     scenes = await generate_all_audio(scenes)
-
-    # --------------------------------------------------------
-    # 4. SAVE PROJECT DATA
-    # --------------------------------------------------------
-
     save_project(topic, scenes)
 
-    # --------------------------------------------------------
-    # 5. SCENE VIDEO
-    # --------------------------------------------------------
-
     clips = render_all_scenes(scenes)
-
-    # --------------------------------------------------------
-    # 6. FINAL VIDEO
-    # --------------------------------------------------------
-
     final_video = concatenate_clips(clips)
-
-    # --------------------------------------------------------
-    # 7. FINAL INFO
-    # --------------------------------------------------------
-
     final_duration = get_media_duration(final_video)
 
     elapsed = time.time() - start_time
@@ -724,3 +683,4 @@ if __name__ == "__main__":
         log.exception("PIPELINE FAILED")
         print()
         print("ERROR:", e)
+        exit(1)
