@@ -3,21 +3,21 @@ import asyncio
 from google import genai
 import edge_tts
 
-# 1. Setup Gemini API with the new google-genai SDK
+# 1. Setup Gemini API with modern google-genai SDK
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 async def generate_script():
     if not GEMINI_KEY:
         raise Exception("GEMINI_API_KEY environment variable is not set.")
     
-    # Initialize client with modern SDK
     client = genai.Client(api_key=GEMINI_KEY.strip())
     
     prompt = "Write an engaging, exciting 40-second Hindi recap script for a popular action manhwa. Keep it in Hindi script or Hinglish, fast-paced and catchy."
     
+    # Updated model list as recommended by Google API response
     models_to_try = [
-        'gemini-2.5-flash',
         'gemini-2.0-flash',
+        'gemini-2.5-flash',
         'gemini-1.5-flash'
     ]
     
