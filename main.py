@@ -1,29 +1,33 @@
 import os
 import asyncio
-import google.generativeai as genai
+from google import genai
 import edge_tts
 
-# 1. Setup Gemini API
+# 1. Setup Gemini API with the new google-genai SDK
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY.strip())
 
 async def generate_script():
+    if not GEMINI_KEY:
+        raise Exception("GEMINI_API_KEY environment variable is not set.")
+    
+    # Initialize client with modern SDK
+    client = genai.Client(api_key=GEMINI_KEY.strip())
+    
     prompt = "Write an engaging, exciting 40-second Hindi recap script for a popular action manhwa. Keep it in Hindi script or Hinglish, fast-paced and catchy."
     
-    # Try updated Gemini models with a fallback list
     models_to_try = [
         'gemini-2.5-flash',
-        'gemini-1.5-flash-latest',
         'gemini-2.0-flash',
-        'gemini-1.5-pro'
+        'gemini-1.5-flash'
     ]
     
     for model_name in models_to_try:
         try:
             print(f"Trying model: {model_name}...")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
             if response and response.text:
                 print(f"Successfully generated script using {model_name}!")
                 return response.text
@@ -42,17 +46,13 @@ async def generate_audio(text):
 
 async def main():
     print("Starting YouTube Automation Pipeline...")
-    if GEMINI_KEY:
-        try:
-            script = await generate_script()
-            print("\n--- Generated Script ---\n", script)
-            await generate_audio(script)
-            print("Pipeline Step Completed Successfully!")
-        except Exception as err:
-            print(f"Pipeline Error: {err}")
-            exit(1)
-    else:
-        print("API Key not found!")
+    try:
+        script = await generate_script()
+        print("\n--- Generated Script ---\n", script)
+        await generate_audio(script)
+        print("Pipeline Step Completed Successfully!")
+    except Exception as err:
+        print(f"Pipeline Error: {err}")
         exit(1)
 
 if __name__ == "__main__":
