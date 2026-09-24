@@ -42,7 +42,6 @@ VOICE_PITCH = "-2Hz"
 GEMINI_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
 ]
 
 IMAGE_BASE_URL = "https://image.pollinations.ai/prompt/"
