@@ -34,8 +34,9 @@ def generate_cosmology_storyboard(topic):
     
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
+    # Updated to the new model gemini-3.8-flash as required
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=f"{system_prompt}\n\n{user_prompt}",
         config={"response_mime_type": "application/json"}
     )
@@ -55,7 +56,6 @@ def build_scene_assets(storyboard):
         print(f"[Processing Scene {scene_id}] Generating assets...")
         
         # --- Image Generation Endpoint Logic ---
-        # Example: Downloading generated frame via API
         # img_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(img_prompt)}?width=1080&height=1920&nologo=true"
         # img_bytes = requests.get(img_url).content
         # with open(f"output/images/scene_{scene_id}.jpg", "wb") as f:
@@ -81,6 +81,8 @@ def main():
     print("Step 1: Requesting structured JSON storyboard from Gemini...")
     storyboard = generate_cosmology_storyboard(current_topic)
     
+    # Ensure output directory exists before saving JSON
+    os.makedirs("output", exist_ok=True)
     with open("output/storyboard.json", "w") as f:
         json.dump(storyboard, f, indent=2)
         
