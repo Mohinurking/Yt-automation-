@@ -1,9 +1,9 @@
-name: YouTube Automation Cron Pipeline
+name: Facebook Reels Cosmology Automation Pipeline
 
 on:
   schedule:
-    # Runs daily at 5:00 PM IST (11:30 AM UTC)
-    - cron: '30 11 * * *'
+    # Runs daily at 22:00 UTC (Targeting 5:00 PM EST / USA Evening)
+    - cron: '0 22 * * *'
 
   # Manual trigger for testing
   workflow_dispatch:
@@ -29,15 +29,9 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai edge-tts requests
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run Automation Script
+      - name: Run Main Script
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python main.py
-
-      - name: Upload Generated Video
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-manhwa-video
-          path: final_video.mp4
