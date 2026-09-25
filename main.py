@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from google import genai
 
@@ -7,7 +8,7 @@ from google import genai
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def generate_cosmology_storyboard(topic):
-    """Generates structured script and visual prompts strictly focused on Cosmology."""
+    """Generates structured script and visual prompts with auto-retry logic."""
     
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
@@ -34,14 +35,23 @@ def generate_cosmology_storyboard(topic):
     
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Updated to the new model gemini-3.8-flash as required
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=f"{system_prompt}\n\n{user_prompt}",
-        config={"response_mime_type": "application/json"}
-    )
-    
-    return json.loads(response.text)
+    # Auto-retry logic for 503 Server Busy errors
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=f"{system_prompt}\n\n{user_prompt}",
+                config={"response_mime_type": "application/json"}
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed with error: {e}")
+            if attempt < max_retries - 1:
+                print("Server temporary busy/unavailable. Retrying in 10 seconds...")
+                time.sleep(10)
+            else:
+                raise Exception("Failed after maximum retries due to Gemini server load.")
 
 def build_scene_assets(storyboard):
     """Processes each scene to generate image prompts and text-to-speech audio."""
@@ -74,7 +84,6 @@ def render_final_reel():
 def main():
     print("🚀 Initiating Autopilot Cosmology Reel Production Engine...")
     
-    # Topic can be fetched dynamically or defined
     current_topic = "What happens if two supermassive black holes collide?"
     
     # Step 1: Script and JSON Storyboard
