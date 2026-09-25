@@ -8,7 +8,7 @@ from google import genai
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def generate_cosmology_storyboard(topic):
-    """Generates structured script and visual prompts with auto-retry logic."""
+    """Generates structured script and visual prompts with auto-retry & fallback models."""
     
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
@@ -35,23 +35,30 @@ def generate_cosmology_storyboard(topic):
     
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Auto-retry logic for 503 Server Busy errors
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=f"{system_prompt}\n\n{user_prompt}",
-                config={"response_mime_type": "application/json"}
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed with error: {e}")
-            if attempt < max_retries - 1:
-                print("Server temporary busy/unavailable. Retrying in 10 seconds...")
-                time.sleep(10)
-            else:
-                raise Exception("Failed after maximum retries due to Gemini server load.")
+    # Try the latest model first, fallback to stable 1.5-flash if servers are busy
+    models_to_try = ["gemini-3.8-flash", "gemini-1.5-flash"]
+    max_retries_per_model = 3
+    
+    for model_name in models_to_try:
+        print(f"\n--- Attempting generation with model: {model_name} ---")
+        for attempt in range(max_retries_per_model):
+            try:
+                print(f"Attempt {attempt + 1} of {max_retries_per_model}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=f"{system_prompt}\n\n{user_prompt}",
+                    config={"response_mime_type": "application/json"}
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                print(f"Error on attempt {attempt + 1} with {model_name}: {e}")
+                if attempt < max_retries_per_model - 1:
+                    print("Server busy. Waiting 15 seconds before retrying...")
+                    time.sleep(15)
+                else:
+                    print(f"Max retries reached for {model_name}. Moving to fallback model if available.")
+                    
+    raise Exception("CRITICAL FAILURE: All models and retries failed due to prolonged server load.")
 
 def build_scene_assets(storyboard):
     """Processes each scene to generate image prompts and text-to-speech audio."""
