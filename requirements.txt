@@ -4,3 +4,4 @@ edge-tts
 gTTS
 pydub
 python-dotenv
+openai
