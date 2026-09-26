@@ -8,7 +8,7 @@ import subprocess
 import edge_tts
 from google import genai
 
-# Clients
+# API Clients
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 
@@ -25,7 +25,7 @@ BACKUP_KEYWORDS = [
 used_video_ids = set()
 
 def generate_cosmology_storyboard(topic):
-    """Generates structured script with highly specific visual search keywords."""
+    """Generates script using multiple backup Gemini models if primary fails."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
@@ -50,20 +50,30 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    max_retries = 10
-    for attempt in range(1, max_retries + 1):
+    # Backup models list in priority order
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+    ]
+    
+    for model_name in models_to_try:
         try:
-            print(f"Requesting script from Gemini (Attempt {attempt})...")
+            print(f"🔄 Trying model: {model_name}...")
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=model_name,
                 contents=f"{system_prompt}\n\n{user_prompt}",
                 config={"response_mime_type": "application/json"}
             )
+            print(f"✅ Success with model: {model_name}")
             return json.loads(response.text)
         except Exception as e:
-            print(f"Error getting script: {e}")
+            print(f"⚠️ Failed with {model_name}: {e}")
+            print("Trying next backup model in 5 seconds...")
             time.sleep(5)
-    raise Exception("Failed to get storyboard script.")
+            
+    raise Exception("❌ All Gemini models failed due to quota or network issues.")
 
 async def generate_voiceover(text, output_file):
     """Generates voiceover using Edge TTS."""
