@@ -75,11 +75,10 @@ def generate_cosmology_storyboard(topic):
         {"provider": "openrouter", "model": "meta-llama/llama-3-8b-instruct:free"}
     ]
     
-    # Reduced cycles for faster execution and preventing GitHub Actions timeout
     total_cycles = 3
     
     for cycle in range(1, total_cycles + 1):
-        print(f"\n🔄 --- Starting Model Cycle {cycle}/{total_cycles} ---")
+        print(f"\n--- Starting Model Cycle {cycle}/{total_cycles} ---")
         for model_info in models_to_try:
             provider = model_info["provider"]
             model_name = model_info["model"]
@@ -110,15 +109,15 @@ def generate_cosmology_storyboard(topic):
                 clean_text = extract_json_from_text(script_text)
                 storyboard = json.loads(clean_text)
                 
-                print(f"✅ Success with {provider.upper()} model: {model_name} (Cycle {cycle})")
+                print(f"Success with {provider.upper()} model: {model_name} (Cycle {cycle})")
                 return storyboard
                 
             except Exception as e:
-                print(f"  ⚠️ Failed with {model_name}: {e}")
+                print(f"  Failed with {model_name}: {e}")
                 print("  Waiting 2 seconds before trying next model...")
                 time.sleep(2)
                 
-    raise Exception("❌ All models failed across all full cycles.")
+    raise Exception("All models failed across all full cycles.")
 
 async def generate_voiceover(text, output_file):
     """Generates voiceover using Edge TTS."""
@@ -126,17 +125,27 @@ async def generate_voiceover(text, output_file):
     await communicate.save(output_file)
 
 def fetch_unique_pexels_video(keyword, output_file):
-    """Downloads unique HD vertical space video clip from Pexels API."""
+    """Downloads unique HD vertical space video clip from Pexels API with strict validation."""
     global used_video_ids
+    
+    if not PEXELS_API_KEY:
+        raise ValueError("CRITICAL: PEXELS_API_KEY is missing in GitHub Secrets!")
+
     headers = {"Authorization": PEXELS_API_KEY}
     search_terms = [keyword] + random.sample(BACKUP_KEYWORDS, len(BACKUP_KEYWORDS))
     
     for term in search_terms:
-        page = random.randint(1, 3)
+        page = random.randint(1, 5)
         url = f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){term}&orientation=portrait&per_page=15&page={page}"
         
         try:
             res = requests.get(url, headers=headers, timeout=15)
+            print(f"  Pexels Query '{term}' Status Code: {res.status_code}")
+            
+            if res.status_code != 200:
+                print(f"  ⚠️ Pexels API Error Response: {res.text}")
+                continue
+                
             data = res.json()
             videos = data.get("videos", [])
             
@@ -144,6 +153,9 @@ def fetch_unique_pexels_video(keyword, output_file):
                 v_id = video.get("id")
                 if v_id not in used_video_ids:
                     video_files = video.get("video_files", [])
+                    if not video_files:
+                        continue
+                        
                     hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
                     video_url = hd_file.get("link")
                     
@@ -157,7 +169,7 @@ def fetch_unique_pexels_video(keyword, output_file):
         except Exception as e:
             print(f"  Pexels fetch attempt failed for '{term}': {e}")
             
-    return False
+    raise RuntimeError(f"❌ Failed to download any stock video from Pexels for keyword: {keyword}")
 
 def build_scene_assets(storyboard):
     """Builds audio and downloads unique stock video clips."""
@@ -184,7 +196,7 @@ def build_scene_assets(storyboard):
 
 def stitch_final_reel(processed_scenes):
     """Stitches unique video clips and audio into a final Reel using FFmpeg."""
-    print("\n🎬 Rendering final Reel with FFmpeg...")
+    print("\nRendering final Reel with FFmpeg...")
     scene_outputs = []
     
     for scene_id, video_path, audio_path in processed_scenes:
@@ -221,10 +233,10 @@ def stitch_final_reel(processed_scenes):
         final_output_path
     ]
     subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"🎉 FINAL UNIQUE REEL CREATED: {final_output_path}")
+    print(f"FINAL UNIQUE REEL CREATED: {final_output_path}")
 
 def main():
-    print("🚀 Initiating Autopilot Cosmology Reel Production Engine...")
+    print("Initiating Autopilot Cosmology Reel Production Engine...")
     current_topic = "What happens if two supermassive black holes collide?"
     
     storyboard = generate_cosmology_storyboard(current_topic)
@@ -236,7 +248,7 @@ def main():
     if processed_scenes:
         stitch_final_reel(processed_scenes)
     
-    print("\n✅ Process Finished Successfully!")
+    print("\nProcess Finished Successfully!")
 
 if __name__ == "__main__":
     main()
