@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import asyncio
 import requests
 import subprocess
@@ -11,15 +12,27 @@ from google import genai
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 
+# Comprehensive space keywords pool for variety
+BACKUP_KEYWORDS = [
+    "black hole animation", "galaxy spinning 4k", "supernova explosion",
+    "wormhole space-time", "neutron star collision", "solar flare space",
+    "cosmic nebula motion", "deep space stars", "event horizon black hole",
+    "milky way core vertical", "space void dark", "astronomy cosmic dust",
+    "hyperspace warp speed", "quasar light emission", "interstellar space travel"
+]
+
+# Track used video IDs to prevent repetition
+used_video_ids = set()
+
 def generate_cosmology_storyboard(topic):
-    """Generates structured script and visual search keywords."""
+    """Generates structured script with highly specific visual search keywords."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
     Target Audience: USA. Language: English. Tone: Atmospheric, cinematic, deep, mysterious.
     
-    CRITICAL RULE: The first scene (0-3 seconds) MUST be an extremely engaging hook.
-    DO NOT include any human psychology, dark human nature, or unrelated subjects.
+    CRITICAL RULE: Each scene MUST have a unique, highly specific visual search keyword for stock videos.
+    Example keywords: "black hole accretion disk", "space warp grid", "galaxy collision animation", "cosmic ray explosion".
     
     Return STRICTLY a JSON object with this structure:
     {
@@ -30,7 +43,7 @@ def generate_cosmology_storyboard(topic):
           "scene_id": 1,
           "duration_seconds": 5,
           "narration_text": "Engaging hook line in English...",
-          "search_keyword": "black hole space animation"
+          "search_keyword": "black hole accretion disk"
         }
       ]
     }
@@ -57,33 +70,47 @@ async def generate_voiceover(text, output_file):
     communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural")
     await communicate.save(output_file)
 
-def fetch_pexels_video(keyword, output_file):
-    """Downloads HD vertical space video clip from Pexels API."""
+def fetch_unique_pexels_video(keyword, output_file):
+    """Downloads unique HD vertical space video clip from Pexels API."""
+    global used_video_ids
     headers = {"Authorization": PEXELS_API_KEY}
-    url = f"https://api.pexels.com/videos/search?query={keyword}&orientation=portrait&per_page=5"
     
-    try:
-        res = requests.get(url, headers=headers, timeout=15)
-        data = res.json()
-        videos = data.get("videos", [])
+    # Try the scene keyword first, then fallback to random backup keywords
+    search_terms = [keyword] + random.sample(BACKUP_KEYWORDS, len(BACKUP_KEYWORDS))
+    
+    for term in search_terms:
+        # Randomize page number to get different clips each run
+        page = random.randint(1, 3)
+        url = f"https://api.pexels.com/videos/search?query={term}&orientation=portrait&per_page=15&page={page}"
         
-        if videos:
-            # Pick first vertical HD video
-            video_files = videos[0].get("video_files", [])
-            hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
-            video_url = hd_file.get("link")
+        try:
+            res = requests.get(url, headers=headers, timeout=15)
+            data = res.json()
+            videos = data.get("videos", [])
             
-            print(f"  Downloading Pexels video clip for '{keyword}'...")
-            v_data = requests.get(video_url, timeout=30).content
-            with open(output_file, "wb") as f:
-                f.write(v_data)
-            return True
-    except Exception as e:
-        print(f"  Pexels download error for keyword '{keyword}': {e}")
+            for video in videos:
+                v_id = video.get("id")
+                # Ensure this clip hasn't been used in current reel
+                if v_id not in used_video_ids:
+                    video_files = video.get("video_files", [])
+                    # Find highest quality vertical file
+                    hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
+                    video_url = hd_file.get("link")
+                    
+                    print(f"  Downloading UNIQUE Pexels clip (ID: {v_id}) for '{term}'...")
+                    v_data = requests.get(video_url, timeout=30).content
+                    with open(output_file, "wb") as f:
+                        f.write(v_data)
+                    
+                    used_video_ids.add(v_id)
+                    return True
+        except Exception as e:
+            print(f"  Pexels fetch attempt failed for '{term}': {e}")
+            
     return False
 
 def build_scene_assets(storyboard):
-    """Builds audio and downloads stock video clips."""
+    """Builds audio and downloads unique stock video clips for each scene."""
     os.makedirs("output/videos", exist_ok=True)
     os.makedirs("output/audio", exist_ok=True)
     
@@ -91,7 +118,7 @@ def build_scene_assets(storyboard):
     
     for scene in storyboard.get("scenes", []):
         scene_id = scene["scene_id"]
-        keyword = scene.get("search_keyword", "space galaxy")
+        keyword = scene.get("search_keyword", "deep space galaxy")
         narration = scene["narration_text"]
         
         print(f"\n--- [Processing Scene {scene_id}] ---")
@@ -100,27 +127,24 @@ def build_scene_assets(storyboard):
         audio_path = f"output/audio/scene_{scene_id}.mp3"
         asyncio.run(generate_voiceover(narration, audio_path))
         
-        # 2. Video Clip
+        # 2. Unique Video Clip
         video_path = f"output/videos/scene_{scene_id}.mp4"
-        success = fetch_pexels_video(keyword, video_path)
+        success = fetch_unique_pexels_video(keyword, video_path)
         
-        # Fallback keyword if specific search fails
-        if not success:
-            fetch_pexels_video("deep space galaxy", video_path)
-            
-        processed_scenes.append((scene_id, video_path, audio_path))
+        if success:
+            processed_scenes.append((scene_id, video_path, audio_path))
         
     return processed_scenes
 
 def stitch_final_reel(processed_scenes):
-    """Stitches clips and audio into a final vertical video using FFmpeg."""
+    """Stitches unique video clips and audio into a final Reel using FFmpeg."""
     print("\n🎬 Rendering final Reel with FFmpeg...")
     scene_outputs = []
     
     for scene_id, video_path, audio_path in processed_scenes:
         merged_scene_path = f"output/videos/merged_scene_{scene_id}.mp4"
         
-        # Trim video to match audio length
+        # Trim/loop video precisely to match voiceover length
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1",
@@ -137,7 +161,7 @@ def stitch_final_reel(processed_scenes):
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         scene_outputs.append(merged_scene_path)
         
-    # Concat all merged scenes
+    # Concat all unique merged scene clips
     concat_list_path = "output/concat_list.txt"
     with open(concat_list_path, "w") as f:
         for path in scene_outputs:
@@ -153,7 +177,7 @@ def stitch_final_reel(processed_scenes):
         final_output_path
     ]
     subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"🎉 FINAL REEL CREATED: {final_output_path}")
+    print(f"🎉 FINAL UNIQUE REEL CREATED: {final_output_path}")
 
 def main():
     print("🚀 Initiating Autopilot Cosmology Reel Production Engine...")
@@ -165,7 +189,8 @@ def main():
         json.dump(storyboard, f, indent=2)
         
     processed_scenes = build_scene_assets(storyboard)
-    stitch_final_reel(processed_scenes)
+    if processed_scenes:
+        stitch_final_reel(processed_scenes)
     
     print("\n✅ Process Finished Successfully!")
 
