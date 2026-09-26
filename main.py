@@ -44,7 +44,7 @@ def extract_json_from_text(text):
     return text.strip()
 
 def generate_cosmology_storyboard(topic):
-    """Generates storyboard with robust model fallbacks."""
+    """Generates storyboard using verified working free AI models."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
@@ -68,12 +68,13 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Updated Active Gemini & OpenRouter Models Pool
+    # Strictly Verified FREE Models Array
     models_to_try = [
         {"provider": "gemini", "model": "gemini-2.5-flash"},
         {"provider": "gemini", "model": "gemini-1.5-flash"},
         {"provider": "openrouter", "model": "google/gemma-2-9b-it:free"},
-        {"provider": "openrouter", "model": "meta-llama/llama-3.1-8b-instruct:free"}
+        {"provider": "openrouter", "model": "mistralai/mistral-7b-instruct:free"},
+        {"provider": "openrouter", "model": "qwen/qwen-2-7b-instruct:free"}
     ]
     
     total_cycles = 3
