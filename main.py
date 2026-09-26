@@ -25,7 +25,7 @@ BACKUP_KEYWORDS = [
 used_video_ids = set()
 
 def generate_cosmology_storyboard(topic):
-    """Generates script using multiple backup Gemini models if primary fails."""
+    """Generates script using multiple backup Gemini models, cycling A-Z multiple times if needed."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
@@ -58,22 +58,26 @@ def generate_cosmology_storyboard(topic):
         "gemini-1.5-pro"
     ]
     
-    for model_name in models_to_try:
-        try:
-            print(f"🔄 Trying model: {model_name}...")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=f"{system_prompt}\n\n{user_prompt}",
-                config={"response_mime_type": "application/json"}
-            )
-            print(f"✅ Success with model: {model_name}")
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"⚠️ Failed with {model_name}: {e}")
-            print("Trying next backup model in 5 seconds...")
-            time.sleep(5)
-            
-    raise Exception("❌ All Gemini models failed due to quota or network issues.")
+    total_cycles = 10  # ৪টি মডেল x ১০ সাইকেল = মোট ৪০ বার ট্রাই করবে
+    
+    for cycle in range(1, total_cycles + 1):
+        print(f"\n🔄 --- Starting Model Cycle {cycle}/{total_cycles} ---")
+        for model_name in models_to_try:
+            try:
+                print(f"  Attempting with model: {model_name}...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=f"{system_prompt}\n\n{user_prompt}",
+                    config={"response_mime_type": "application/json"}
+                )
+                print(f"✅ Success with model: {model_name} (Cycle {cycle})")
+                return json.loads(response.text)
+            except Exception as e:
+                print(f"  ⚠️ Failed with {model_name}: {e}")
+                print("  Waiting 5 seconds before trying next model...")
+                time.sleep(5)
+                
+    raise Exception("❌ All Gemini models failed across all full cycles. Quota might be completely exhausted.")
 
 async def generate_voiceover(text, output_file):
     """Generates voiceover using Edge TTS."""
