@@ -42,4 +42,7 @@ jobs:
         if: always()
         with:
           name: final-cosmology-reel
-          path: output/final_cosmology_reel.mp4
+          path: |
+            output/
+            output/*.mp4
+          if-no-files-found: warn
