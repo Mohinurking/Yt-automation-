@@ -25,7 +25,7 @@ BACKUP_KEYWORDS = [
 used_video_ids = set()
 
 def generate_cosmology_storyboard(topic):
-    """Generates script using multiple backup Gemini models, cycling A-Z multiple times if needed."""
+    """Generates script using currently available Gemini models with retry cycles."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
@@ -50,15 +50,14 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Backup models list in priority order
+    # Updated active models list compatible with current API
     models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro"
+        "gemini-3.8-flash",
+        "gemini-flash",
+        "gemini-pro"
     ]
     
-    total_cycles = 10  # ৪টি মডেল x ১০ সাইকেল = মোট ৪০ বার ট্রাই করবে
+    total_cycles = 10  # মোট ১০ বার পুরো লিস্ট ঘুরবে
     
     for cycle in range(1, total_cycles + 1):
         print(f"\n🔄 --- Starting Model Cycle {cycle}/{total_cycles} ---")
