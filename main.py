@@ -8,7 +8,7 @@ from google import genai
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def generate_cosmology_storyboard(topic):
-    """Generates structured script and visual prompts with robust auto-retry."""
+    """Generates structured script and visual prompts with 50 retries at 5-second intervals."""
     
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
@@ -35,28 +35,29 @@ def generate_cosmology_storyboard(topic):
     
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Using only the updated supported model with extended retries for 503 Server Busy errors
+    max_retries = 50
+    wait_time = 5  # 5 seconds delay
     model_name = "gemini-3.8-flash"
-    max_retries = 5
     
-    print(f"\n--- Attempting generation with model: {model_name} ---")
-    for attempt in range(max_retries):
+    print(f"\n--- Requesting storyboard using {model_name} (Max retries: {max_retries}) ---")
+    
+    for attempt in range(1, max_retries + 1):
         try:
-            print(f"Attempt {attempt + 1} of {max_retries}...")
+            print(f"Attempt {attempt} of {max_retries}...")
             response = client.models.generate_content(
                 model=model_name,
                 contents=f"{system_prompt}\n\n{user_prompt}",
                 config={"response_mime_type": "application/json"}
             )
+            print("  Successfully received response from Gemini API!")
             return json.loads(response.text)
         except Exception as e:
-            print(f"Error on attempt {attempt + 1}: {e}")
-            if attempt < max_retries - 1:
-                # Increased wait time to 25 seconds to give the server more time to recover
-                print("Server busy or unavailable. Waiting 25 seconds before retrying...")
-                time.sleep(25)
+            print(f"  Attempt {attempt} failed: {e}")
+            if attempt < max_retries:
+                print(f"  Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
             else:
-                raise Exception("CRITICAL FAILURE: Failed after maximum retries due to prolonged server load.")
+                raise Exception("CRITICAL FAILURE: Exceeded maximum 50 retries due to persistent Google API server load.")
 
 def build_scene_assets(storyboard):
     """Processes each scene to generate image prompts and text-to-speech audio."""
@@ -69,22 +70,10 @@ def build_scene_assets(storyboard):
         narration = scene["narration_text"]
         
         print(f"[Processing Scene {scene_id}] Generating assets...")
-        
-        # --- Image Generation Endpoint Logic ---
-        # img_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(img_prompt)}?width=1080&height=1920&nologo=true"
-        # img_bytes = requests.get(img_url).content
-        # with open(f"output/images/scene_{scene_id}.jpg", "wb") as f:
-        #     f.write(img_bytes)
-
-        # --- TTS Audio Generation Logic ---
-        # Generate TTS audio file and save as output/audio/scene_{scene_id}.mp3
-        
-    print("Asset generation phase complete.")
 
 def render_final_reel():
     """Stitches images and audio into a single 9:16 vertical video using FFmpeg/MoviePy."""
     print("Stitching video frames and audio channels into final output...")
-    # FFmpeg compilation commands execute here
 
 def main():
     print("🚀 Initiating Autopilot Cosmology Reel Production Engine...")
