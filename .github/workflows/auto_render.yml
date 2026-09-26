@@ -40,3 +40,4 @@ jobs:
         with:
           name: cosmology-reel-output
           path: output/
+pip install openai google-genai edge-tts requests
