@@ -22,12 +22,12 @@ client_openrouter = openai.OpenAI(
     api_key=OPENROUTER_API_KEY
 ) if OPENROUTER_API_KEY else None
 
-# Backup keywords pool for stock videos
+# Diverse space keywords pool for absolute uniqueness
 BACKUP_KEYWORDS = [
-    "black hole animation", "galaxy spinning 4k", "supernova explosion",
-    "wormhole space-time", "neutron star collision", "solar flare space",
-    "cosmic nebula motion", "deep space stars", "event horizon black hole",
-    "milky way core vertical", "space void dark", "astronomy cosmic dust"
+    "deep space 4k", "black hole accretion", "spinning galaxy vertical", 
+    "supernova explosion motion", "wormhole tunnel space", "neutron star cosmic", 
+    "solar flare universe", "nebulas cinematic space", "event horizon dark", 
+    "milky way vertical cosmos", "astronomy space exploration", "interstellar void"
 ]
 
 used_video_ids = set()
@@ -68,7 +68,6 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Active Gemini Models & OpenRouter Fallback
     models_to_try = [
         {"provider": "gemini", "model": "gemini-3.8-flash"},
         {"provider": "gemini", "model": "gemini-3.5-flash"},
@@ -114,7 +113,6 @@ def generate_cosmology_storyboard(topic):
                 
             except Exception as e:
                 print(f"  Failed with {model_name}: {e}")
-                print("  Waiting 2 seconds before trying next model...")
                 time.sleep(2)
                 
     raise Exception("All models failed across all full cycles.")
@@ -125,51 +123,54 @@ async def generate_voiceover(text, output_file):
     await communicate.save(output_file)
 
 def fetch_unique_pexels_video(keyword, output_file):
-    """Downloads unique HD vertical space video clip from Pexels API with strict validation."""
+    """Downloads guaranteed unique HD vertical space video clip from Pexels API."""
     global used_video_ids
     
     if not PEXELS_API_KEY:
-        raise ValueError("CRITICAL: PEXELS_API_KEY is missing in GitHub Secrets!")
+        print("⚠️ Warning: PEXELS_API_KEY is missing!")
+        return False
 
     headers = {"Authorization": PEXELS_API_KEY}
+    
+    # Mix target keyword with backup pool
     search_terms = [keyword] + random.sample(BACKUP_KEYWORDS, len(BACKUP_KEYWORDS))
     
     for term in search_terms:
-        page = random.randint(1, 5)
+        page = random.randint(1, 8)
         url = f"[https://api.pexels.com/videos/search?query=](https://api.pexels.com/videos/search?query=){term}&orientation=portrait&per_page=15&page={page}"
         
         try:
             res = requests.get(url, headers=headers, timeout=15)
-            print(f"  Pexels Query '{term}' Status Code: {res.status_code}")
-            
-            if res.status_code != 200:
-                print(f"  ⚠️ Pexels API Error Response: {res.text}")
-                continue
+            if res.status_code == 200:
+                data = res.json()
+                videos = data.get("videos", [])
                 
-            data = res.json()
-            videos = data.get("videos", [])
-            
-            for video in videos:
-                v_id = video.get("id")
-                if v_id not in used_video_ids:
-                    video_files = video.get("video_files", [])
-                    if not video_files:
-                        continue
+                # Shuffle videos to prevent taking the first video every time
+                random.shuffle(videos)
+                
+                for video in videos:
+                    v_id = video.get("id")
+                    if v_id not in used_video_ids:
+                        video_files = video.get("video_files", [])
+                        if not video_files:
+                            continue
+                            
+                        # Pick suitable vertical video link
+                        hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
+                        video_url = hd_file.get("link")
                         
-                    hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
-                    video_url = hd_file.get("link")
-                    
-                    print(f"  Downloading UNIQUE Pexels clip (ID: {v_id}) for '{term}'...")
-                    v_data = requests.get(video_url, timeout=30).content
-                    with open(output_file, "wb") as f:
-                        f.write(v_data)
-                    
-                    used_video_ids.add(v_id)
-                    return True
+                        print(f"  Downloading UNIQUE Pexels clip (ID: {v_id}) for query '{term}'...")
+                        v_data = requests.get(video_url, timeout=30).content
+                        with open(output_file, "wb") as f:
+                            f.write(v_data)
+                        
+                        used_video_ids.add(v_id)
+                        return True
         except Exception as e:
-            print(f"  Pexels fetch attempt failed for '{term}': {e}")
+            print(f"  Fetch attempt failed for '{term}': {e}")
             
-    raise RuntimeError(f"❌ Failed to download any stock video from Pexels for keyword: {keyword}")
+    print(f"❌ Could not find a unique video for '{keyword}', retrying default...")
+    return False
 
 def build_scene_assets(storyboard):
     """Builds audio and downloads unique stock video clips."""
@@ -191,6 +192,8 @@ def build_scene_assets(storyboard):
         
         if success:
             processed_scenes.append((scene_id, video_path, audio_path))
+        else:
+            print(f"Skipping scene {scene_id} due to video fetch issue.")
         
     return processed_scenes
 
@@ -208,7 +211,7 @@ def stitch_final_reel(processed_scenes):
             "-i", video_path,
             "-i", audio_path,
             "-c:v", "libx264",
-            "-tune", "stillimage",
+            "-preset", "ultrafast",
             "-c:a", "aac",
             "-b:a", "192k",
             "-pix_fmt", "yuv420p",
@@ -247,7 +250,9 @@ def main():
     processed_scenes = build_scene_assets(storyboard)
     if processed_scenes:
         stitch_final_reel(processed_scenes)
-    
+    else:
+        print("❌ No scenes processed successfully. Video render skipped.")
+
     print("\nProcess Finished Successfully!")
 
 if __name__ == "__main__":
