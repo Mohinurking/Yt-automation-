@@ -22,7 +22,7 @@ client_openrouter = openai.OpenAI(
     api_key=OPENROUTER_API_KEY
 ) if OPENROUTER_API_KEY else None
 
-# Diverse space keywords pool for absolute uniqueness
+# Backup keywords pool for stock videos
 BACKUP_KEYWORDS = [
     "deep space 4k", "black hole accretion", "spinning galaxy vertical", 
     "supernova explosion motion", "wormhole tunnel space", "neutron star cosmic", 
@@ -44,7 +44,7 @@ def extract_json_from_text(text):
     return text.strip()
 
 def generate_cosmology_storyboard(topic):
-    """Generates storyboard using active Gemini models first, with OpenRouter fallback."""
+    """Generates storyboard with robust model fallbacks."""
     system_prompt = """
     You are an expert video producer for US Facebook Reels.
     Create a 60-second vertical (9:16) script about Cosmology & Space Mysteries.
@@ -68,10 +68,12 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
+    # Updated Active Gemini & OpenRouter Models Pool
     models_to_try = [
-        {"provider": "gemini", "model": "gemini-3.8-flash"},
-        {"provider": "gemini", "model": "gemini-3.5-flash"},
-        {"provider": "openrouter", "model": "meta-llama/llama-3-8b-instruct:free"}
+        {"provider": "gemini", "model": "gemini-2.5-flash"},
+        {"provider": "gemini", "model": "gemini-1.5-flash"},
+        {"provider": "openrouter", "model": "google/gemma-2-9b-it:free"},
+        {"provider": "openrouter", "model": "meta-llama/llama-3.1-8b-instruct:free"}
     ]
     
     total_cycles = 3
@@ -113,9 +115,9 @@ def generate_cosmology_storyboard(topic):
                 
             except Exception as e:
                 print(f"  Failed with {model_name}: {e}")
-                time.sleep(2)
+                time.sleep(3)
                 
-    raise Exception("All models failed across all full cycles.")
+    raise Exception("All AI models failed to generate content.")
 
 async def generate_voiceover(text, output_file):
     """Generates voiceover using Edge TTS."""
@@ -131,8 +133,6 @@ def fetch_unique_pexels_video(keyword, output_file):
         return False
 
     headers = {"Authorization": PEXELS_API_KEY}
-    
-    # Mix target keyword with backup pool
     search_terms = [keyword] + random.sample(BACKUP_KEYWORDS, len(BACKUP_KEYWORDS))
     
     for term in search_terms:
@@ -145,7 +145,6 @@ def fetch_unique_pexels_video(keyword, output_file):
                 data = res.json()
                 videos = data.get("videos", [])
                 
-                # Shuffle videos to prevent taking the first video every time
                 random.shuffle(videos)
                 
                 for video in videos:
@@ -155,7 +154,6 @@ def fetch_unique_pexels_video(keyword, output_file):
                         if not video_files:
                             continue
                             
-                        # Pick suitable vertical video link
                         hd_file = next((f for f in video_files if f.get("height", 0) >= 1280), video_files[0])
                         video_url = hd_file.get("link")
                         
