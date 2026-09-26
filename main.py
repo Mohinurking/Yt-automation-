@@ -68,13 +68,12 @@ def generate_cosmology_storyboard(topic):
     """
     user_prompt = f"Generate a high-retention space documentary storyboard about: {topic}"
     
-    # Strictly Verified FREE Models Array
+    # Highly Stable & Verified FREE Models List
     models_to_try = [
-        {"provider": "gemini", "model": "gemini-2.5-flash"},
         {"provider": "gemini", "model": "gemini-1.5-flash"},
         {"provider": "openrouter", "model": "google/gemma-2-9b-it:free"},
-        {"provider": "openrouter", "model": "mistralai/mistral-7b-instruct:free"},
-        {"provider": "openrouter", "model": "qwen/qwen-2-7b-instruct:free"}
+        {"provider": "openrouter", "model": "huggingfaceh4/zephyr-7b-beta:free"},
+        {"provider": "openrouter", "model": "meta-llama/llama-3.2-3b-instruct:free"}
     ]
     
     total_cycles = 3
